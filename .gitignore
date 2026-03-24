@@ -1,0 +1,8 @@
+node_modules/
+.env
+database/tasks.db
+01_project_overview.md
+02_requirements.md
+03_tech_stack.md
+04_implementation_plan.md
+05_security_audit.md

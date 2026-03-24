@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Task Manager</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>Student Task Manager</h1>
+            <p>Organize your academic life efficiently</p>
+        </header>
+
+        <section class="task-form-section">
+            <form id="task-form">
+                <div class="input-group">
+                    <input type="text" id="title" placeholder="What needs to be done?" required maxlength="255" autocomplete="off">
+                </div>
+                <div class="input-group">
+                    <textarea id="description" placeholder="Additional details (optional)" rows="3" maxlength="1000" autocomplete="off"></textarea>
+                </div>
+                <div class="input-group">
+                    <input type="date" id="due_date">
+                    <button type="submit" class="btn-primary">Add Task</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="task-list-section">
+            <div class="filters">
+                <button class="filter-btn active" data-filter="all">All</button>
+                <button class="filter-btn" data-filter="Pending">Pending</button>
+                <button class="filter-btn" data-filter="Completed">Completed</button>
+            </div>
+            
+            <ul id="task-list" class="task-list">
+                <!-- Tasks will be injected here dynamically -->
+                <div class="loading">Loading tasks...</div>
+            </ul>
+        </section>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

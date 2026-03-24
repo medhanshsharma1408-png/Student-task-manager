@@ -1,0 +1,41 @@
+name: Node.js CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    # Run these steps within the backend node repository
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18.x'
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Start server
+      run: |
+        echo "Starting backend server in the background..."
+        npm start &
+        
+        # Wait a few seconds for Express to boot
+        sleep 5
+        
+        # Validate that the backend API is alive and reachable 
+        curl -f http://localhost:3000/tasks || (echo "Server failed to start!" && exit 1)
+        
+        echo "Server is fully operational and responded to health test!"
