@@ -2,8 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const { Pool } = require('pg');
 require('dotenv').config();
 
 const app = express();
@@ -16,7 +15,7 @@ app.use(helmet());
 const corsOptions = {
     origin: process.env.NODE_ENV === 'production' && process.env.FRONTEND_URL 
         ? process.env.FRONTEND_URL 
-        : '*', // Allow all in dev, restrict in prod
+        : '*',
     optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
@@ -34,21 +33,27 @@ const apiLimiter = rateLimit({
 });
 app.use('/tasks', apiLimiter);
 
-// Database connection
-const dbPath = path.resolve(__dirname, '../database/tasks.db');
-const db = new sqlite3.Database(dbPath, (err) => {
+// Postgres Database Connection Pool
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    // Add SSL support securely if required by hosted PostgreSQL (common on Render)
+    ssl: process.env.NODE_ENV === 'production' && typeof process.env.DATABASE_URL === 'string' && process.env.DATABASE_URL.includes('onrender') ? { rejectUnauthorized: false } : false
+});
+
+pool.connect((err, client, release) => {
     if (err) {
-        console.error('Error opening database:', err.message);
+        console.error('Error connecting to PostgreSQL database:', err.stack);
     } else {
-        console.log('Connected to the SQLite database.');
-        // Initialize table
-        db.run(`CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
+        console.log('Connected to the PostgreSQL database.');
+        // Initialize table natively 
+        pool.query(`CREATE TABLE IF NOT EXISTS tasks (
+            id SERIAL PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
             description TEXT,
-            due_date TEXT,
-            status TEXT DEFAULT 'Pending'
-        )`);
+            due_date VARCHAR(50),
+            status VARCHAR(50) DEFAULT 'Pending'
+        )`).catch(tableErr => console.error('Error creating table:', tableErr.stack));
+        release();
     }
 });
 
@@ -58,19 +63,18 @@ app.get('/', (req, res) => {
 });
 
 // API ROUTE: GET all tasks
-app.get('/tasks', (req, res) => {
-    db.all('SELECT * FROM tasks', [], (err, rows) => {
-        if (err) {
-            console.error('Database Error:', err.message); // Information kept internal
-            res.status(500).json({ error: 'Internal Server Error' }); // Generic production response
-            return;
-        }
-        res.json(rows);
-    });
+app.get('/tasks', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM tasks ORDER BY id ASC');
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Database Error:', err.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
 });
 
 // API ROUTE: POST a new task
-app.post('/tasks', (req, res) => {
+app.post('/tasks', async (req, res) => {
     const { title, description, due_date } = req.body;
     
     // Server-side Input Validation
@@ -84,22 +88,21 @@ app.post('/tasks', (req, res) => {
         return res.status(400).json({ error: 'Description exceeds maximum length of 1000 characters' });
     }
     
-    const sql = 'INSERT INTO tasks (title, description, due_date) VALUES (?, ?, ?)';
+    // Postgres uses $1, $2 mapping scheme instead of SQLite's (?, ?) scheme
+    const sql = 'INSERT INTO tasks (title, description, due_date) VALUES ($1, $2, $3) RETURNING id';
     const params = [title.trim(), description ? description.trim() : null, due_date || null];
     
-    // Parameterized queries used here to prevent SQL injection
-    db.run(sql, params, function (err) {
-        if (err) {
-            console.error('Database Error:', err.message);
-            res.status(500).json({ error: 'Internal Server Error' });
-            return;
-        }
-        res.status(201).json({ id: this.lastID, title, description, due_date, status: 'Pending' });
-    });
+    try {
+        const result = await pool.query(sql, params);
+        res.status(201).json({ id: result.rows[0].id, title, description, due_date, status: 'Pending' });
+    } catch (err) {
+        console.error('Database Error:', err.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
 });
 
 // API ROUTE: PUT update a task
-app.put('/tasks/:id', (req, res) => {
+app.put('/tasks/:id', async (req, res) => {
     const { title, description, due_date, status } = req.body;
     const { id } = req.params;
     
@@ -108,33 +111,31 @@ app.put('/tasks/:id', (req, res) => {
     if (description && description.length > 1000) return res.status(400).json({ error: 'Description too long' });
     if (status && !['Pending', 'Completed'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
-    const sql = 'UPDATE tasks SET title = COALESCE(?, title), description = COALESCE(?, description), due_date = COALESCE(?, due_date), status = COALESCE(?, status) WHERE id = ?';
+    const sql = 'UPDATE tasks SET title = COALESCE($1, title), description = COALESCE($2, description), due_date = COALESCE($3, due_date), status = COALESCE($4, status) WHERE id = $5';
     const params = [title, description, due_date, status, id];
     
-    db.run(sql, params, function (err) {
-        if (err) {
-            console.error('Database Error:', err.message);
-            res.status(500).json({ error: 'Internal Server Error' });
-            return;
-        }
-        res.json({ message: `Task ${id} updated`, changes: this.changes });
-    });
+    try {
+        const result = await pool.query(sql, params);
+        res.json({ message: `Task ${id} updated`, changes: result.rowCount });
+    } catch (err) {
+        console.error('Database Error:', err.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
 });
 
 // API ROUTE: DELETE a task
-app.delete('/tasks/:id', (req, res) => {
+app.delete('/tasks/:id', async (req, res) => {
     const { id } = req.params;
-    db.run('DELETE FROM tasks WHERE id = ?', id, function (err) {
-        if (err) {
-            console.error('Database Error:', err.message);
-            res.status(500).json({ error: 'Internal Server Error' });
-            return;
-        }
-        if (this.changes === 0) {
+    try {
+        const result = await pool.query('DELETE FROM tasks WHERE id = $1', [id]);
+        if (result.rowCount === 0) {
             return res.status(404).json({ error: 'Task not found' });
         }
-        res.json({ message: `Task ${id} deleted successfully`, changes: this.changes });
-    });
+        res.json({ message: `Task ${id} deleted successfully`, changes: result.rowCount });
+    } catch (err) {
+        console.error('Database Error:', err.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
 });
 
 app.listen(PORT, () => {
