@@ -26,7 +26,7 @@ jobs:
           --health-retries 5
     
     env:
-      DATABASE_URL: postgres://testuser:testpass@localhost:5432/taskdb
+      DATABASE_URL: postgres://testuser:testpass@127.0.0.1:5432/taskdb
     
     # Run these steps within the backend node repository
     defaults:
